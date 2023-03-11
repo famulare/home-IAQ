@@ -15,7 +15,22 @@ d = read_csv('smashburger_IAQ_20230305.csv') %>%
 
 ggplot(d) +
   geom_line(aes(x=hours,y=value,group=name,color=name)) +
-  facet_wrap('name',scale='free_y')
+  facet_wrap('name',scale='free_y') +
+  theme_bw() +
+  xlab('hours after cooking') +
+  ylab('microgram per cubic meter')
+ggsave('concentration_vs_time.png',width = 6,height=4)
+
+ggplot(d) +
+  geom_line(aes(x=hours,y=value,group=name,color=name)) +
+  facet_wrap('name',scale='free_y') +
+  theme_bw() +
+  xlab('hours after cooking') +
+  ylab('microgram per cubic meter') +
+  scale_y_continuous(trans='log10')
+ggsave('log10_concentration_vs_time.png',width = 6,height=4)
+
+
 
 
 concentration = function(t=seq(0,2,by=0.05),ACH,C0,S){
@@ -32,9 +47,9 @@ concentration_three_scale = function(t=seq(0,2,by=0.05),ACH=1,C0=100,S=20,lambda
                                      f1=0.5,lambda_fast=15,
                                      E=0.1,te=0.75){
 
-  Ct = (C0- S*exp(-t*lambda_slow)/ACH) * ((1-f1)*exp(-t*ACH)+f1*exp(-t*lambda_fast)) + S*exp(-t*lambda_slow)*(1/ACH+1/lambda_fast)
+  Ct = (C0- S*exp(-t*lambda_slow)/ACH) * ((1-f1)*exp(-t*ACH)+f1*exp(-t*lambda_fast)) + S*exp(-t*lambda_slow)*((1-f1)/ACH+f1/lambda_fast)
 
-  Et = E*(C0- S*exp(-(t-te)*lambda_slow)/ACH) * ((1-f1)*exp(-(t-te)*ACH)+f1*exp(-(t-te)*lambda_fast)) + S*exp(-(t-te)*lambda_slow)*(1/ACH+1/lambda_fast)
+  Et = E*(C0- S*exp(-(t-te)*lambda_slow)/ACH) * ((1-f1)*exp(-(t-te)*ACH)+f1*exp(-(t-te)*lambda_fast)) + S*exp(-(t-te)*lambda_slow)*((1-f1)/ACH+f1/lambda_fast)
   Et[t<te]=0
   Ct=Ct+Et
 
@@ -77,16 +92,17 @@ for( name in levels(d$name)){
   d$model_two_scale[idx]=predict(m2)
   params_two_scale[name==unique(d$name),]=coef(m2)
 
-  m3 = nlsLM(log(value)~log(concentration_three_scale(t=hours,ACH,C0,S,lambda_slow,f1,lambda3,E)),
-             start=list(ACH=6,C0=max(tmp$value),S=min(tmp$value),lambda_slow=0.5,f1=0.5,lambda3=20,E=0.1),
+  m3 = nlsLM(log(value)~log(concentration_three_scale(t=hours,ACH,C0,S,lambda_slow,f1,lambda_fast,E)),
+             start=list(ACH=6,C0=max(tmp$value),S=min(tmp$value),lambda_slow=0.3,f1=0.5,lambda_fast=25,E=0.1),
              data=tmp,
-             lower=c(1,0,0,0,0,10,0),
-             upper=c(10,Inf,Inf,1,1,Inf,1),
+             lower=c(0.5,0,0,0,0,15,0),
+             upper=c(15,Inf,Inf,1,1,Inf,0.5),
              control=nls.lm.control(maxiter=100))
-  d$model_three_scale[idx]=exp(predict(m3))
   params_three_scale[name==unique(d$name),]=coef(m3)
+  d$model_three_scale[idx]=exp(predict(m3))
 
 }
+
 params
 params_two_scale # I'm not sure why this isn't fitting reasonably, but whatever, the harder one works!
 params_three_scale
@@ -102,3 +118,66 @@ ggplot(d) +
 # sunday's daily average PM2.5 was 4.7 mu-g/m3
 # ach into the house is 1/3 per hour it looks like.
 
+joint_model = function(t=d$hours[d$name=='PM2.5'],te=0.75,
+                       lambda_slow=0.05,
+                       f1=0.5,
+                       lambda_fast_PM=25,
+                       lambda_fast_VO=6,
+                       ACH_PM=1,ACH_VO=1,
+                       C0_pm2=100,S_pm2=2,E_pm=0.1,
+                       C0_pm10=200,S_pm10=5,
+                       C0_hcho=20,S_hcho=2,E_vo=0.5,
+                       C0_tvoc=30,S_tvoc=10
+                       ){
+
+  model=c(concentration_three_scale(t,ACH=ACH_PM,lambda_slow = lambda_slow,f1=f1,lambda_fast = lambda_fast_PM,
+                                    C0=C0_pm2,S=S_pm2,E=E_pm),
+          concentration_three_scale(t,ACH=ACH_PM,lambda_slow = lambda_slow,f1=f1,lambda_fast = lambda_fast_PM,
+                                    C0=C0_pm10,S=S_pm10,  E=E_pm),
+          concentration_three_scale(t,ACH=ACH_VO,lambda_slow = lambda_slow,f1=f1,lambda_fast = lambda_fast_VO,
+                                    C0=C0_hcho,S=S_hcho,  E=E_vo),
+          concentration_three_scale(t,ACH=ACH_VO,lambda_slow = lambda_slow,f1=f1,lambda_fast = lambda_fast_VO,
+                                    C0=C0_tvoc,S=S_tvoc,  E=E_vo)
+  )
+  return(model)
+}
+
+
+m4 = nlsLM(
+           log(value)~log(joint_model(t=hours[1:(nrow(d)/4)],
+                                      ACH_PM=ACH_PM, ACH_VO = ACH_VO,
+                                      lambda_slow=lambda_slow,f1=f1,
+                                      lambda_fast_PM=lambda_fast_PM,
+                                      lambda_fast_VO=lambda_fast_VO,
+                                      C0_pm2=C0_pm2,S_pm2=S_pm2,E_pm=E_pm,
+                                      C0_pm10=C0_pm10,S_pm10=S_pm10,
+                                      C0_hcho=C0_hcho,S_hcho=S_hcho,E_vo=E_vo,
+                                      C0_tvoc=C0_tvoc,S_tvoc=S_tvoc,
+                                      )),
+           start=list(ACH_PM=6,ACH_VO=1,
+                      lambda_slow=0.3,f1=0.5,lambda_fast_PM=20,
+                      lambda_fast_VO=6,
+                      C0_pm2=100,S_pm2=2,E_pm=0.1,
+                      C0_pm10=200,S_pm10=5,
+                      C0_hcho=1,S_hcho=0.1,E_vo=0.3,
+                      C0_tvoc=1,S_tvoc=0.1
+                      ),
+           data=d,
+           lower=c(0.5,0.5, 0,0, 15,1, rep(0,10)),
+           upper=c(15,15,0.5,1,Inf,Inf,rep(Inf,10)),
+           control=nls.lm.control(maxiter=100))
+coef(m4)
+d$model_joint=exp(predict(m4))
+
+ggplot(d) +
+  geom_line(aes(x=hours,y=model_joint,group=name),size=1,linetype='solid') +
+  geom_line(aes(x=hours,y=value,group=name,color=name)) +
+  facet_wrap('name',scale='free_y') +
+  scale_y_continuous(trans='log10')
+ggsave('log10_concentration_vs_time_joint_model.png',width = 6,height=4)
+
+ggplot(d) +
+  geom_line(aes(x=hours,y=model_joint,group=name),size=1,linetype='solid') +
+  geom_line(aes(x=hours,y=value,group=name,color=name)) +
+  facet_wrap('name',scale='free_y')
+ggsave('concentration_vs_time_joint_model.png',width = 6,height=4)
