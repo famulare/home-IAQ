@@ -1,4 +1,4 @@
-# smashburger IAQ
+# smashburger IAQx
 
 library(tidyverse)
 library(lubridate)
@@ -108,9 +108,9 @@ params_two_scale # I'm not sure why this isn't fitting reasonably, but whatever,
 params_three_scale
 
 ggplot(d) +
-  # geom_line(aes(x=hours,y=model,group=name,color=name),size=1,linetype='dashed') +
+  # geom_line(aes(x=hours,y=model,group=name,color=name),linewidth=1,linetype='dashed') +
   # geom_line(aes(x=hours,y=model_two_scale,group=name,color=name),size=1,linetype='solid') +
-  geom_line(aes(x=hours,y=model_three_scale,group=name),size=1,linetype='solid') +
+  geom_line(aes(x=hours,y=model_three_scale,group=name),linewidth=1,linetype='solid') +
   geom_line(aes(x=hours,y=value,group=name,color=name)) +
   facet_wrap('name',scale='free_y') +
   scale_y_continuous(trans='log10')
